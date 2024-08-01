@@ -112,9 +112,13 @@
     
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
-        const socket = io();
-
-        socket.on('new_analysis_result', function(data) {
+        
+        const clientId = "{{ client_id }}";
+        const socket = io({ query: { client_id: clientId } });
+        console.log(clientId)
+        const eventName = `new_analysis_result_${clientId}`;
+        socket.on(eventName, function(data) {
+            console.log("Received data:", data); 
             const cardTemplate = document.getElementById('tempcard');
             const clonedCard = cardTemplate.cloneNode(true);
             clonedCard.id = 'card' + (document.querySelectorAll('.card').length + 1) + "-" + data.name;
@@ -163,7 +167,8 @@
                 topic:topic,
                 linguaggio: linguaggio,
                 risultati_per_pagina: risultati_per_pagina,
-                pagine: pagine
+                pagine: pagine,
+                client_id:clientId
             })
             .then(function (response) {
                 str="";
@@ -191,7 +196,9 @@
             })
             .then(function (response) {
                 document.getElementById('errorSingleField').innerText = "";
-                return axios.post('/send');
+                return axios.post('/send', {
+                client_id: clientId
+                });
             })
             .then(function (response) {
                 alert('Repository aggiunto e inviato con successo a RabbitMQ.');
@@ -201,16 +208,20 @@
                 document.getElementById('errorSingleField').innerText = error.response.data.message || "Si è verificato un errore durante l'aggiunta del repository.";
             });
         });
-
         document.getElementById('sendButton').addEventListener('click', function() {
-            axios.post('/send')
+
+            console.log(clientId)
+            axios.post('/send', {
+                client_id: clientId
+            })
             .then(function (response) {
-                alert(response.data.message);
+                
             })
             .catch(function (error) {
                 console.error(error);
             });
-        });
+        
+    });
     </script>
 </body>
 </html>

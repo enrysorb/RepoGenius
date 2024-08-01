@@ -8,7 +8,7 @@ import multiprocessing
 from multiprocessing import Manager
 from groq import Groq
 from dotenv import load_dotenv
-import shutil  # Add this import for folder deletion
+import shutil  # Aggiunto per la cancellazione delle cartelle
 import requests
 
 VALID_EXTENSIONS = [
@@ -31,8 +31,8 @@ def analyze_code(file_path, client):
             chat_completion = client.chat.completions.create(
                 messages=[
                     {
-    "role": "user",
-    "content": f"""Here is a piece of code:
+                        "role": "user",
+                        "content": f"""Here is a piece of code:
     {code_content}
 Answer the following questions:
 
@@ -66,7 +66,7 @@ Answers:
    b. Original code:
    c. Refactored code:
     """
-}
+                    }
                 ],
                 model="llama3-8b-8192",
             )
@@ -83,12 +83,11 @@ Answers:
                 print(f" [!] Unexpected error: {e}")
                 return f"Error: {e}"
 
-def analyze_repository(repo_url, counter, lock):
+def analyze_repository(repo_url, counter, lock, client_id):
     load_dotenv()
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
     repo_name = repo_url.split('/')[-1].replace('.git', '')
-
     repo_path = os.path.join('../Repo', repo_name)
 
     if not os.path.exists(repo_path):
@@ -147,10 +146,12 @@ def analyze_repository(repo_url, counter, lock):
         counter.value -= 1
         print(f" [x] Active processes: {counter.value}")
 
-    analysis_results["name"]=repo_name
+    analysis_results["name"] = repo_name
+    analysis_results["client_id"] = client_id  # Include the client_id in the results
+
     r = requests.post('http://localhost:5001/analysis_results', json=analysis_results)
     if r.status_code == 200:
-        try: 
+        try:
             shutil.rmtree(analyzed_repo_path)
             print(f" [x] Deleted analyzed repository directory {analyzed_repo_path}")
         except OSError as e:
@@ -163,11 +164,11 @@ def keep_alive():
         channel.basic_publish(exchange='', routing_key='keep_alive', body='keep_alive')
         time.sleep(30)
 
-def worker_main(repo_url, counter, lock):
+def worker_main(repo_url, counter, lock, client_id):
     with lock:
         counter.value += 1
         print(f" [x] Active processes: {counter.value}")
-    analyze_repository(repo_url, counter, lock)
+    analyze_repository(repo_url, counter, lock, client_id)
 
 def main():
     load_dotenv()
@@ -183,14 +184,29 @@ def main():
     keep_alive_process.start()
 
     manager = Manager()
-    counter = manager.Value('i', 0)  
-    lock = manager.Lock()  
+    counter = manager.Value('i', 0)
+    lock = manager.Lock()
 
     def callback(ch, method, properties, body):
-        repo_url = body.decode()
-        print(f" [x] Received {repo_url}")
-        process = multiprocessing.Process(target=worker_main, args=(repo_url, counter, lock))
-        process.start()
+        print(f" [x] Received message: {body.decode()}")
+        try:
+            message = body.decode()
+            if not message:
+                print(" [!] Received empty message.")
+                return
+
+            repo_data = json.loads(message)
+            repo_url = repo_data['repo_url']
+            client_id = repo_data.get('client_id', '')  # Default to empty string if client_id is missing
+
+            print(f" [x] Received {repo_url} from client {client_id}")
+
+            process = multiprocessing.Process(target=worker_main, args=(repo_url, counter, lock, client_id))
+            process.start()
+        except json.JSONDecodeError as e:
+            print(f" [!] JSON decoding error: {e}")
+        except Exception as e:
+            print(f" [!] Unexpected error: {e}")
 
     channel.basic_consume(queue='Repositories', on_message_callback=callback, auto_ack=True)
 
